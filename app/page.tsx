@@ -295,7 +295,21 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex flex-col relative">
+      {/* Demo Data Watermark */}
+      <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
+        <div 
+          className="text-6xl font-bold opacity-20 select-none"
+          style={{
+            color: '#fef3c7',
+            transform: 'rotate(-45deg)',
+            textShadow: '2px 2px 4px rgba(0,0,0,0.1)',
+            letterSpacing: '0.1em'
+          }}
+        >
+          DEMO DATA
+        </div>
+      </div>
       {/* Main Content */}
       <div className="container mx-auto px-6 py-6 flex-1">
         {/* Header with Logo */}

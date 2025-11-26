@@ -15,10 +15,11 @@ export function GlobalKPICards() {
     // Use current filters to determine what to show
     // Get target geography from filters - use all selected geographies or use all geographies
     const allGeographies = data.dimensions.geographies.all_geographies || []
-    // If no geographies are selected, we'll use all geographies (empty array means no filter)
+    // For KPIs, if no geographies are selected, show totals for ALL geographies
+    // If geographies are selected, show totals for those geographies only
     let selectedGeographies = filters.geographies.length > 0 
       ? filters.geographies // Use all selected geographies
-      : [] // Empty array means we'll show data for all geographies
+      : [] // Empty array means we'll show data for all geographies (global total)
     
     // Get segment type from filters (or use first segment type)
     const segmentTypes = Object.keys(data.dimensions.segments)
@@ -207,28 +208,92 @@ export function GlobalKPICards() {
       return null
     }
 
-    // Calculate total market size for 2024 and 2032
+    // Get available years from metadata or from first record
+    const availableYears = data.metadata.years || []
+    const startYear = data.metadata.start_year || availableYears[0] || 2024
+    const endYear = data.metadata.forecast_year || availableYears[availableYears.length - 1] || 2032
+    
+    // Use actual years from data instead of hardcoded 2024/2032
+    const kpiStartYear = startYear
+    const kpiEndYear = endYear
+    
+    // Debug: Check what data we have
+    const sampleRecord = globalRecords[0]
+    const sampleTimeSeries = sampleRecord?.time_series || {}
+    const timeSeriesKeys = Object.keys(sampleTimeSeries).map(k => parseInt(k)).filter(k => !isNaN(k))
+    
+    console.log('KPI Calculation Debug:', {
+      recordsCount: globalRecords.length,
+      availableYears,
+      startYear: kpiStartYear,
+      endYear: kpiEndYear,
+      timeSeriesKeys: timeSeriesKeys.sort((a, b) => a - b),
+      sampleRecord: sampleRecord ? {
+        geography: sampleRecord.geography,
+        segment: sampleRecord.segment,
+        hasTimeSeries: !!sampleRecord.time_series,
+        sampleValues: {
+          [kpiStartYear]: sampleTimeSeries[kpiStartYear],
+          [kpiEndYear]: sampleTimeSeries[kpiEndYear],
+          2024: sampleTimeSeries[2024],
+          2032: sampleTimeSeries[2032]
+        }
+      } : null
+    })
+
+    // Calculate total market size for start and end years
     let marketSize2024 = 0
     let marketSize2032 = 0
 
     globalRecords.forEach(record => {
       // Handle both number and string keys for years
       const timeSeries = record.time_series || {}
-      const value2024 = timeSeries[2024] ?? timeSeries['2024'] ?? 0
-      const value2032 = timeSeries[2032] ?? timeSeries['2032'] ?? 0
+      
+      // Try to get values - first try the actual years from metadata, then fallback to 2024/2032
+      // timeSeries is Record<number, number>, so we need to use number keys
+      let valueStart = timeSeries[kpiStartYear] ?? 0
+      let valueEnd = timeSeries[kpiEndYear] ?? 0
+      
+      // If we got zeros, try 2024/2032 as fallback
+      if (valueStart === 0 && timeSeries[2024] !== undefined) {
+        valueStart = timeSeries[2024]
+      }
+      if (valueEnd === 0 && timeSeries[2032] !== undefined) {
+        valueEnd = timeSeries[2032]
+      }
+      
+      // If still zero, try to find any non-zero value in the time series
+      if (valueStart === 0) {
+        const years = Object.keys(timeSeries).map(k => parseInt(k)).filter(k => !isNaN(k)).sort((a, b) => a - b)
+        if (years.length > 0) {
+          valueStart = timeSeries[years[0]] ?? 0
+        }
+      }
+      if (valueEnd === 0) {
+        const years = Object.keys(timeSeries).map(k => parseInt(k)).filter(k => !isNaN(k)).sort((a, b) => b - a)
+        if (years.length > 0) {
+          valueEnd = timeSeries[years[0]] ?? 0
+        }
+      }
       
       // Ensure values are numbers
-      const num2024 = typeof value2024 === 'number' ? value2024 : parseFloat(String(value2024)) || 0
-      const num2032 = typeof value2032 === 'number' ? value2032 : parseFloat(String(value2032)) || 0
+      const num2024 = typeof valueStart === 'number' ? valueStart : parseFloat(String(valueStart)) || 0
+      const num2032 = typeof valueEnd === 'number' ? valueEnd : parseFloat(String(valueEnd)) || 0
       
       marketSize2024 += num2024
       marketSize2032 += num2032
     })
+    
+    console.log('KPI Totals:', {
+      marketSize2024,
+      marketSize2032,
+      recordsUsed: globalRecords.length,
+      calculationYears: `${kpiStartYear} to ${kpiEndYear}`
+    })
 
-
-    // Calculate CAGR from 2024 to 2032
-    const years = 2032 - 2024
-    const cagr = marketSize2024 > 0 
+    // Calculate CAGR from start year to end year
+    const years = kpiEndYear - kpiStartYear
+    const cagr = marketSize2024 > 0 && years > 0
       ? (Math.pow(marketSize2032 / marketSize2024, 1 / years) - 1) * 100
       : 0
 
