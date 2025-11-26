@@ -48,65 +48,69 @@ export function GlobalKPICards() {
       return true
     })
     
-    // Use aggregation data based on aggregationLevel filter
-    if (filters.aggregationLevel !== null && filters.aggregationLevel !== undefined) {
-      // When aggregationLevel is set, use records at that level
-      // Prefer aggregated records at that level, but also include leaf records at that level
-      globalRecords = globalRecords.filter(record => 
-        record.aggregation_level === filters.aggregationLevel
-      )
-      
-      // If we have aggregated records at this level, prefer them over leaf records
-      const aggregatedAtLevel = globalRecords.filter(r => r.is_aggregated === true)
-      if (aggregatedAtLevel.length > 0) {
-        // Use aggregated records, but also include leaf records that don't have a corresponding aggregated record
-        const aggregatedSegments = new Set(aggregatedAtLevel.map(r => `${r.geography}::${r.segment}`))
-        globalRecords = globalRecords.filter(record => 
-          record.is_aggregated === true || 
-          !aggregatedSegments.has(`${record.geography}::${record.segment}`)
-        )
-      }
+    // For KPI calculation, we want to sum ALL records to get global totals
+    // Use leaf records to avoid double-counting, or use aggregated records if they represent unique geographies
+    // Strategy: Use leaf records if available, otherwise use aggregated records but ensure no double-counting
+    
+    // First, try to use leaf records (most accurate, no double-counting)
+    let leafRecords = globalRecords.filter(record => record.is_aggregated === false)
+    
+    if (leafRecords.length > 0) {
+      // Use leaf records - these are the most granular and accurate
+      globalRecords = leafRecords
     } else {
-      // When aggregationLevel is null (showing "All Levels"), use highest level aggregated records
-      // First, try to find level 1 aggregated records (total aggregation per geography)
-      const level1Aggregated = globalRecords.filter(record => 
-        record.aggregation_level === 1 && record.is_aggregated === true
-      )
-      
-      if (level1Aggregated.length > 0) {
-        // Use level 1 aggregated records
-        globalRecords = level1Aggregated
+      // No leaf records available, try to use aggregated records
+      // If aggregationLevel is set, use records at that level
+      if (filters.aggregationLevel !== null && filters.aggregationLevel !== undefined) {
+        globalRecords = globalRecords.filter(record => 
+          record.aggregation_level === filters.aggregationLevel
+        )
+        
+        // Prefer aggregated records at this level
+        const aggregatedAtLevel = globalRecords.filter(r => r.is_aggregated === true)
+        if (aggregatedAtLevel.length > 0) {
+          // Use aggregated records, but ensure we're not double-counting
+          // Group by geography to get unique geography totals
+          const geographyMap = new Map<string, DataRecord>()
+          aggregatedAtLevel.forEach(record => {
+            const key = record.geography
+            // If we already have this geography, sum the values
+            if (geographyMap.has(key)) {
+              const existing = geographyMap.get(key)!
+              existing.time_series[2024] = (existing.time_series[2024] || 0) + (record.time_series[2024] || 0)
+              existing.time_series[2032] = (existing.time_series[2032] || 0) + (record.time_series[2032] || 0)
+            } else {
+              geographyMap.set(key, { ...record })
+            }
+          })
+          globalRecords = Array.from(geographyMap.values())
+        }
       } else {
-        // Fall back to aggregating leaf records manually
-        // Group by geography and sum values
-        const geographyTotals = new Map<string, { record: DataRecord, total2024: number, total2032: number }>()
+        // aggregationLevel is null - try level 1 aggregated records (total per geography)
+        const level1Aggregated = globalRecords.filter(record => 
+          record.aggregation_level === 1 && record.is_aggregated === true
+        )
         
-        const leafRecords = globalRecords.filter(record => record.is_aggregated === false)
-        leafRecords.forEach(record => {
-          const key = record.geography
-          if (!geographyTotals.has(key)) {
-            geographyTotals.set(key, {
-              record: { ...record },
-              total2024: 0,
-              total2032: 0
+        if (level1Aggregated.length > 0) {
+          globalRecords = level1Aggregated
+        } else {
+          // Fall back to any aggregated records, grouping by geography
+          const aggregatedRecords = globalRecords.filter(r => r.is_aggregated === true)
+          if (aggregatedRecords.length > 0) {
+            const geographyMap = new Map<string, DataRecord>()
+            aggregatedRecords.forEach(record => {
+              const key = record.geography
+              if (geographyMap.has(key)) {
+                const existing = geographyMap.get(key)!
+                existing.time_series[2024] = (existing.time_series[2024] || 0) + (record.time_series[2024] || 0)
+                existing.time_series[2032] = (existing.time_series[2032] || 0) + (record.time_series[2032] || 0)
+              } else {
+                geographyMap.set(key, { ...record })
+              }
             })
+            globalRecords = Array.from(geographyMap.values())
           }
-          const totals = geographyTotals.get(key)!
-          totals.total2024 += record.time_series[2024] || 0
-          totals.total2032 += record.time_series[2032] || 0
-        })
-        
-        // Create aggregated records from totals
-        globalRecords = Array.from(geographyTotals.values()).map(({ record, total2024, total2032 }) => ({
-          ...record,
-          time_series: {
-            ...record.time_series,
-            2024: total2024,
-            2032: total2032
-          },
-          is_aggregated: true,
-          aggregation_level: 1
-        }))
+        }
       }
     }
 
@@ -121,42 +125,38 @@ export function GlobalKPICards() {
         return true
       })
       
-      // Use same aggregation logic for fallback
-      if (filters.aggregationLevel !== null && filters.aggregationLevel !== undefined) {
-        const recordsAtLevel = allRecordsForSegmentType.filter(record => 
-          record.aggregation_level === filters.aggregationLevel
-        )
-        const aggregatedAtLevel = recordsAtLevel.filter(r => r.is_aggregated === true)
-        if (aggregatedAtLevel.length > 0) {
-          const aggregatedSegments = new Set(aggregatedAtLevel.map(r => `${r.geography}::${r.segment}`))
-          globalRecords = recordsAtLevel.filter(record => 
-            record.is_aggregated === true || 
-            !aggregatedSegments.has(`${record.geography}::${record.segment}`)
-          )
-        } else {
-          globalRecords = recordsAtLevel
-        }
+      // Always prefer leaf records for accuracy
+      const leafRecords = allRecordsForSegmentType.filter(record => record.is_aggregated === false)
+      if (leafRecords.length > 0) {
+        globalRecords = leafRecords
+        selectedGeographies = []
       } else {
-        // Try level 1 aggregated records
+        // Fall back to aggregated records - use level 1 if available
         const level1Aggregated = allRecordsForSegmentType.filter(record => 
           record.aggregation_level === 1 && record.is_aggregated === true
         )
         if (level1Aggregated.length > 0) {
           globalRecords = level1Aggregated
+          selectedGeographies = []
         } else {
-          // Fall back to leaf records
-          const leafRecords = allRecordsForSegmentType.filter(record => 
-            record.is_aggregated === false
-          )
-          if (leafRecords.length > 0) {
-            globalRecords = leafRecords
+          // Use any aggregated records, grouping by geography
+          const aggregatedRecords = allRecordsForSegmentType.filter(r => r.is_aggregated === true)
+          if (aggregatedRecords.length > 0) {
+            const geographyMap = new Map<string, DataRecord>()
+            aggregatedRecords.forEach(record => {
+              const key = record.geography
+              if (geographyMap.has(key)) {
+                const existing = geographyMap.get(key)!
+                existing.time_series[2024] = (existing.time_series[2024] || 0) + (record.time_series[2024] || 0)
+                existing.time_series[2032] = (existing.time_series[2032] || 0) + (record.time_series[2032] || 0)
+              } else {
+                geographyMap.set(key, { ...record })
+              }
+            })
+            globalRecords = Array.from(geographyMap.values())
+            selectedGeographies = []
           }
         }
-      }
-      
-      if (globalRecords.length > 0) {
-        // Update selected geographies to reflect that we're showing all geographies
-        selectedGeographies = []
       }
     }
 
@@ -166,41 +166,38 @@ export function GlobalKPICards() {
         return record.segment_type === targetSegmentType
       })
       
-      // Use same aggregation logic for fallback
-      if (filters.aggregationLevel !== null && filters.aggregationLevel !== undefined) {
-        const recordsAtLevel = allRecordsForSegmentType.filter(record => 
-          record.aggregation_level === filters.aggregationLevel
-        )
-        const aggregatedAtLevel = recordsAtLevel.filter(r => r.is_aggregated === true)
-        if (aggregatedAtLevel.length > 0) {
-          const aggregatedSegments = new Set(aggregatedAtLevel.map(r => `${r.geography}::${r.segment}`))
-          globalRecords = recordsAtLevel.filter(record => 
-            record.is_aggregated === true || 
-            !aggregatedSegments.has(`${record.geography}::${record.segment}`)
-          )
-        } else {
-          globalRecords = recordsAtLevel
-        }
+      // Always prefer leaf records
+      const leafRecords = allRecordsForSegmentType.filter(record => record.is_aggregated === false)
+      if (leafRecords.length > 0) {
+        globalRecords = leafRecords
+        selectedGeographies = []
       } else {
-        // Try level 1 aggregated records
+        // Fall back to level 1 aggregated records
         const level1Aggregated = allRecordsForSegmentType.filter(record => 
           record.aggregation_level === 1 && record.is_aggregated === true
         )
         if (level1Aggregated.length > 0) {
           globalRecords = level1Aggregated
+          selectedGeographies = []
         } else {
-          // Fall back to leaf records
-          const leafRecords = allRecordsForSegmentType.filter(record => 
-            record.is_aggregated === false
-          )
-          if (leafRecords.length > 0) {
-            globalRecords = leafRecords
+          // Use any aggregated records
+          const aggregatedRecords = allRecordsForSegmentType.filter(r => r.is_aggregated === true)
+          if (aggregatedRecords.length > 0) {
+            const geographyMap = new Map<string, DataRecord>()
+            aggregatedRecords.forEach(record => {
+              const key = record.geography
+              if (geographyMap.has(key)) {
+                const existing = geographyMap.get(key)!
+                existing.time_series[2024] = (existing.time_series[2024] || 0) + (record.time_series[2024] || 0)
+                existing.time_series[2032] = (existing.time_series[2032] || 0) + (record.time_series[2032] || 0)
+              } else {
+                geographyMap.set(key, { ...record })
+              }
+            })
+            globalRecords = Array.from(geographyMap.values())
+            selectedGeographies = []
           }
         }
-      }
-      
-      if (globalRecords.length > 0) {
-        selectedGeographies = []
       }
     }
 
@@ -215,9 +212,19 @@ export function GlobalKPICards() {
     let marketSize2032 = 0
 
     globalRecords.forEach(record => {
-      marketSize2024 += record.time_series[2024] || 0
-      marketSize2032 += record.time_series[2032] || 0
+      // Handle both number and string keys for years
+      const timeSeries = record.time_series || {}
+      const value2024 = timeSeries[2024] ?? timeSeries['2024'] ?? 0
+      const value2032 = timeSeries[2032] ?? timeSeries['2032'] ?? 0
+      
+      // Ensure values are numbers
+      const num2024 = typeof value2024 === 'number' ? value2024 : parseFloat(String(value2024)) || 0
+      const num2032 = typeof value2032 === 'number' ? value2032 : parseFloat(String(value2032)) || 0
+      
+      marketSize2024 += num2024
+      marketSize2032 += num2032
     })
+
 
     // Calculate CAGR from 2024 to 2032
     const years = 2032 - 2024
