@@ -137,9 +137,18 @@ export default function DashboardPage() {
 
   // Auto-switch to first available tab when chart group changes
   useEffect(() => {
+    // Only switch if the current tab is not valid for the current chart group
+    const currentChartId = Object.entries(chartIdToTab).find(([_, tab]) => tab === activeTab)?.[0]
+    const isCurrentTabValid = currentChartId && isChartVisible(currentChartId)
+    
+    // If current tab is valid, don't switch
+    if (isCurrentTabValid) {
+      return
+    }
+    
     // If currently on customer-intelligence tab but no data exists, switch to first available
     if (activeTab === 'customer-intelligence' && !hasIntelligenceData) {
-      const firstVisibleChart = visibleCharts.find(chart => chart !== 'customer-intelligence')
+      const firstVisibleChart = visibleCharts.find(chart => chart !== 'customer-intelligence' && isChartVisible(chart))
       if (firstVisibleChart && chartIdToTab[firstVisibleChart]) {
         const targetTab = chartIdToTab[firstVisibleChart]
         console.log('No intelligence data, switching from customer-intelligence tab to:', targetTab)
@@ -150,14 +159,16 @@ export default function DashboardPage() {
     
     // If only intelligence data exists, switch to customer-intelligence tab
     if (!hasMarketData && hasIntelligenceData && activeTab !== 'customer-intelligence') {
-      console.log('Only intelligence data exists, switching to customer-intelligence tab')
-      setActiveTab('customer-intelligence')
-      return
+      if (isChartVisible('customer-intelligence')) {
+        console.log('Only intelligence data exists, switching to customer-intelligence tab')
+        setActiveTab('customer-intelligence')
+        return
+      }
     }
     
-    // If only market data exists, switch to first market tab
+    // If only market data exists and we're on customer-intelligence, switch to first market tab
     if (hasMarketData && !hasIntelligenceData && activeTab === 'customer-intelligence') {
-      const firstMarketChart = visibleCharts.find(chart => chart !== 'customer-intelligence')
+      const firstMarketChart = visibleCharts.find(chart => chart !== 'customer-intelligence' && isChartVisible(chart))
       if (firstMarketChart && chartIdToTab[firstMarketChart]) {
         const targetTab = chartIdToTab[firstMarketChart]
         console.log('Only market data exists, switching from customer-intelligence to:', targetTab)
@@ -166,15 +177,19 @@ export default function DashboardPage() {
       }
     }
     
-    const firstVisibleChart = visibleCharts[0]
+    // Find first visible chart for the current group
+    const firstVisibleChart = visibleCharts.find(chart => isChartVisible(chart))
     if (firstVisibleChart && chartIdToTab[firstVisibleChart]) {
       const targetTab = chartIdToTab[firstVisibleChart]
-      console.log('Switching to tab:', targetTab, 'for chart group:', selectedChartGroup)
-      setActiveTab(targetTab)
+      // Only switch if we're not already on this tab
+      if (activeTab !== targetTab) {
+        console.log('Switching to tab:', targetTab, 'for chart group:', selectedChartGroup)
+        setActiveTab(targetTab)
+      }
     } else {
       console.warn('No visible chart found for group:', selectedChartGroup, 'visibleCharts:', visibleCharts)
     }
-  }, [selectedChartGroup, visibleCharts, hasIntelligenceData, hasMarketData, activeTab])
+  }, [selectedChartGroup, visibleCharts, hasIntelligenceData, hasMarketData])
 
   // Auto-switch to heatmap when matrix mode is selected
   useEffect(() => {
@@ -554,7 +569,7 @@ export default function DashboardPage() {
           <div className="p-6">
                 {viewMode === 'tabs' ? (
                   <>
-                    {activeTab === 'bar' && (
+                    {activeTab === 'bar' && hasMarketData && (
                       <div id="grouped-bar-chart">
                         <GroupedBarChart 
                           title="Comparative Analysis - Grouped Bars" 
@@ -563,7 +578,7 @@ export default function DashboardPage() {
                       </div>
                     )}
                     
-                    {hasMarketData && activeTab === 'line' && isChartVisible('multi-line') && (
+                    {activeTab === 'line' && hasMarketData && (
                       <div id="line-chart">
                         <MultiLineChart 
                           title="Trend Analysis - Multiple Series" 
@@ -572,7 +587,7 @@ export default function DashboardPage() {
                       </div>
                     )}
                     
-                    {hasMarketData && activeTab === 'heatmap' && isChartVisible('heatmap') && (
+                    {activeTab === 'heatmap' && hasMarketData && (
                       <div id="heatmap-chart">
                         <MatrixHeatmap 
                           title="Matrix View - Geography × Segment" 
@@ -581,7 +596,7 @@ export default function DashboardPage() {
                       </div>
                     )}
                     
-                    {hasMarketData && activeTab === 'table' && isChartVisible('comparison-table') && (
+                    {activeTab === 'table' && hasMarketData && (
                       <div id="comparison-table">
                         <ComparisonTable 
                           title="Data Comparison Table" 
@@ -590,7 +605,7 @@ export default function DashboardPage() {
                       </div>
                     )}
                     
-                    {hasMarketData && activeTab === 'waterfall' && isChartVisible('waterfall') && (
+                    {activeTab === 'waterfall' && hasMarketData && (
                       <div id="waterfall-chart">
                         <WaterfallChart 
                           title="Contribution Analysis - Waterfall Chart" 
@@ -599,7 +614,7 @@ export default function DashboardPage() {
                       </div>
                     )}
                     
-                    {hasMarketData && activeTab === 'bubble' && isChartVisible('bubble') && (
+                    {activeTab === 'bubble' && hasMarketData && (
                       <div id="bubble-chart">
                         <D3BubbleChartIndependent 
                           title="Coherent Opportunity Matrix" 
@@ -608,7 +623,7 @@ export default function DashboardPage() {
                       </div>
                     )}
                     
-                    {hasMarketData && activeTab === 'competitive-intelligence' && isChartVisible('competitive-intelligence') && (
+                    {activeTab === 'competitive-intelligence' && hasMarketData && (
                       <div id="competitive-intelligence-chart">
                         <CompetitiveIntelligence 
                           height={600}
