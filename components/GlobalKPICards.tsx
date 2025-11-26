@@ -256,24 +256,15 @@ export function GlobalKPICards() {
     const selectedCurrency = currency || data.metadata.currency || 'USD'
     const isINR = selectedCurrency === 'INR'
     
-    // Values in time_series are in base units (not millions)
-    // For INR, we don't use "Million", we use Indian number system (Lakhs, Crores)
-    // For USD, we convert to millions
+    // Get unit label
     const unit = filters.dataType === 'value'
       ? (data.metadata.value_unit || 'Million')
       : (data.metadata.volume_unit || 'Units')
-    const needsConversion = unit.toLowerCase().includes('million') && !isINR
     
-    // Convert to display units
-    const marketSize2024Display = needsConversion 
-      ? marketSize2024 / 1000000
-      : marketSize2024
-    const marketSize2032Display = needsConversion 
-      ? marketSize2032 / 1000000
-      : marketSize2032
-    const absoluteGrowthDisplay = needsConversion 
-      ? absoluteGrowth / 1000000
-      : absoluteGrowth
+    // Use raw values directly - no conversion
+    const marketSize2024Display = marketSize2024
+    const marketSize2032Display = marketSize2032
+    const absoluteGrowthDisplay = absoluteGrowth
 
     // Build descriptive labels
     // Note: selectedGeographies might be empty if we fell back to showing all geographies
@@ -293,7 +284,7 @@ export function GlobalKPICards() {
       absoluteGrowth: absoluteGrowthDisplay,
       growthPercentage,
       currency: selectedCurrency,
-      unit: isINR ? '' : (unit || 'Million'),
+      unit: unit || '',
       dataTypeLabel,
       geographyLabel,
       segmentTypeLabel,
