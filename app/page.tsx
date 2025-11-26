@@ -299,12 +299,15 @@ export default function DashboardPage() {
       {/* Demo Data Watermark */}
       <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
         <div 
-          className="text-6xl font-bold opacity-20 select-none"
+          className="font-bold select-none"
           style={{
-            color: '#fef3c7',
+            color: '#fde68a',
+            fontSize: '120px',
             transform: 'rotate(-45deg)',
-            textShadow: '2px 2px 4px rgba(0,0,0,0.1)',
-            letterSpacing: '0.1em'
+            textShadow: '3px 3px 6px rgba(0,0,0,0.2)',
+            letterSpacing: '0.15em',
+            opacity: 0.4,
+            fontWeight: 900
           }}
         >
           DEMO DATA

@@ -35,85 +35,71 @@ export function GlobalKPICards() {
       ? data.data.value.geography_segment_matrix
       : data.data.volume.geography_segment_matrix
     
-    // Filter records based on selected geographies and segment type
-    // Use aggregation data when available based on aggregationLevel filter
+    // For KPI calculation, ALWAYS use leaf records to avoid double-counting
+    // Filter by segment type and geography, but use ALL leaf records matching those filters
     let globalRecords = dataset.filter(record => {
-      // Filter by geography - include records from any selected geography
+      // Must match segment type
+      if (targetSegmentType && record.segment_type !== targetSegmentType) {
+        return false
+      }
+      // Filter by geography if selected
       if (selectedGeographies.length > 0 && !selectedGeographies.includes(record.geography)) {
         return false
       }
-      // Filter by segment type (CRITICAL: prevents double-counting across segment types)
-      if (targetSegmentType && record.segment_type !== targetSegmentType) {
+      // ONLY use leaf records (is_aggregated === false) to prevent double-counting
+      if (record.is_aggregated !== false) {
         return false
       }
       return true
     })
     
-    // For KPI calculation, we want to sum ALL records to get global totals
-    // Use leaf records to avoid double-counting, or use aggregated records if they represent unique geographies
-    // Strategy: Use leaf records if available, otherwise use aggregated records but ensure no double-counting
-    
-    // First, try to use leaf records (most accurate, no double-counting)
-    let leafRecords = globalRecords.filter(record => record.is_aggregated === false)
-    
-    if (leafRecords.length > 0) {
-      // Use leaf records - these are the most granular and accurate
-      globalRecords = leafRecords
-    } else {
-      // No leaf records available, try to use aggregated records
-      // If aggregationLevel is set, use records at that level
-      if (filters.aggregationLevel !== null && filters.aggregationLevel !== undefined) {
-        globalRecords = globalRecords.filter(record => 
-          record.aggregation_level === filters.aggregationLevel
-        )
-        
-        // Prefer aggregated records at this level
-        const aggregatedAtLevel = globalRecords.filter(r => r.is_aggregated === true)
-        if (aggregatedAtLevel.length > 0) {
-          // Use aggregated records, but ensure we're not double-counting
-          // Group by geography to get unique geography totals
-          const geographyMap = new Map<string, DataRecord>()
-          aggregatedAtLevel.forEach(record => {
-            const key = record.geography
-            // If we already have this geography, sum the values
-            if (geographyMap.has(key)) {
-              const existing = geographyMap.get(key)!
-              existing.time_series[2024] = (existing.time_series[2024] || 0) + (record.time_series[2024] || 0)
-              existing.time_series[2032] = (existing.time_series[2032] || 0) + (record.time_series[2032] || 0)
-            } else {
-              geographyMap.set(key, { ...record })
-            }
-          })
-          globalRecords = Array.from(geographyMap.values())
+    // If no leaf records found, try without geography filter
+    if (globalRecords.length === 0 && selectedGeographies.length > 0) {
+      globalRecords = dataset.filter(record => {
+        if (targetSegmentType && record.segment_type !== targetSegmentType) {
+          return false
         }
-      } else {
-        // aggregationLevel is null - try level 1 aggregated records (total per geography)
-        const level1Aggregated = globalRecords.filter(record => 
-          record.aggregation_level === 1 && record.is_aggregated === true
-        )
-        
-        if (level1Aggregated.length > 0) {
-          globalRecords = level1Aggregated
-        } else {
-          // Fall back to any aggregated records, grouping by geography
-          const aggregatedRecords = globalRecords.filter(r => r.is_aggregated === true)
-          if (aggregatedRecords.length > 0) {
-            const geographyMap = new Map<string, DataRecord>()
-            aggregatedRecords.forEach(record => {
-              const key = record.geography
-              if (geographyMap.has(key)) {
-                const existing = geographyMap.get(key)!
-                existing.time_series[2024] = (existing.time_series[2024] || 0) + (record.time_series[2024] || 0)
-                existing.time_series[2032] = (existing.time_series[2032] || 0) + (record.time_series[2032] || 0)
-              } else {
-                geographyMap.set(key, { ...record })
-              }
-            })
-            globalRecords = Array.from(geographyMap.values())
-          }
+        if (record.is_aggregated !== false) {
+          return false
         }
+        return true
+      })
+      if (globalRecords.length > 0) {
+        selectedGeographies = []
       }
     }
+    
+    // If still no records, try any segment type
+    if (globalRecords.length === 0) {
+      globalRecords = dataset.filter(record => {
+        if (selectedGeographies.length > 0 && !selectedGeographies.includes(record.geography)) {
+          return false
+        }
+        if (record.is_aggregated !== false) {
+          return false
+        }
+        return true
+      })
+    }
+    
+    console.log('KPI Debug:', {
+      totalDatasetRecords: dataset.length,
+      leafRecordsFound: globalRecords.length,
+      segmentType: targetSegmentType,
+      selectedGeographies: selectedGeographies.length > 0 ? selectedGeographies : 'All',
+      sampleRecord: globalRecords[0] ? {
+        geography: globalRecords[0].geography,
+        segment: globalRecords[0].segment,
+        segmentType: globalRecords[0].segment_type,
+        timeSeriesKeys: globalRecords[0].time_series ? Object.keys(globalRecords[0].time_series).map(k => parseInt(k)).filter(k => !isNaN(k)).sort((a, b) => a - b) : [],
+        sampleValues: globalRecords[0].time_series ? {
+          first: globalRecords[0].time_series[Object.keys(globalRecords[0].time_series).map(k => parseInt(k)).filter(k => !isNaN(k)).sort((a, b) => a - b)[0]],
+          last: globalRecords[0].time_series[Object.keys(globalRecords[0].time_series).map(k => parseInt(k)).filter(k => !isNaN(k)).sort((a, b) => b - a)[0]],
+          '2024': globalRecords[0].time_series[2024],
+          '2032': globalRecords[0].time_series[2032]
+        } : null
+      } : null
+    })
 
     // If no records match the current filters, try a fallback approach
     // First, try without geography filter if geographies were selected
@@ -213,66 +199,27 @@ export function GlobalKPICards() {
     const startYear = data.metadata.start_year || availableYears[0] || 2024
     const endYear = data.metadata.forecast_year || availableYears[availableYears.length - 1] || 2032
     
-    // Use actual years from data instead of hardcoded 2024/2032
+    // Use actual years from data, but also try 2024/2032
     const kpiStartYear = startYear
     const kpiEndYear = endYear
-    
-    // Debug: Check what data we have
-    const sampleRecord = globalRecords[0]
-    const sampleTimeSeries = sampleRecord?.time_series || {}
-    const timeSeriesKeys = Object.keys(sampleTimeSeries).map(k => parseInt(k)).filter(k => !isNaN(k))
-    
-    console.log('KPI Calculation Debug:', {
-      recordsCount: globalRecords.length,
-      availableYears,
-      startYear: kpiStartYear,
-      endYear: kpiEndYear,
-      timeSeriesKeys: timeSeriesKeys.sort((a, b) => a - b),
-      sampleRecord: sampleRecord ? {
-        geography: sampleRecord.geography,
-        segment: sampleRecord.segment,
-        hasTimeSeries: !!sampleRecord.time_series,
-        sampleValues: {
-          [kpiStartYear]: sampleTimeSeries[kpiStartYear],
-          [kpiEndYear]: sampleTimeSeries[kpiEndYear],
-          2024: sampleTimeSeries[2024],
-          2032: sampleTimeSeries[2032]
-        }
-      } : null
-    })
 
-    // Calculate total market size for start and end years
+    // Calculate total market size - sum ALL leaf records
     let marketSize2024 = 0
     let marketSize2032 = 0
 
     globalRecords.forEach(record => {
-      // Handle both number and string keys for years
       const timeSeries = record.time_series || {}
       
-      // Try to get values - first try the actual years from metadata, then fallback to 2024/2032
-      // timeSeries is Record<number, number>, so we need to use number keys
-      let valueStart = timeSeries[kpiStartYear] ?? 0
-      let valueEnd = timeSeries[kpiEndYear] ?? 0
+      // Try multiple year options
+      let valueStart = timeSeries[kpiStartYear] ?? timeSeries[2024] ?? 0
+      let valueEnd = timeSeries[kpiEndYear] ?? timeSeries[2032] ?? 0
       
-      // If we got zeros, try 2024/2032 as fallback
-      if (valueStart === 0 && timeSeries[2024] !== undefined) {
-        valueStart = timeSeries[2024]
-      }
-      if (valueEnd === 0 && timeSeries[2032] !== undefined) {
-        valueEnd = timeSeries[2032]
-      }
-      
-      // If still zero, try to find any non-zero value in the time series
-      if (valueStart === 0) {
-        const years = Object.keys(timeSeries).map(k => parseInt(k)).filter(k => !isNaN(k)).sort((a, b) => a - b)
+      // If still zero, get first and last available years
+      if (valueStart === 0 || valueEnd === 0) {
+        const years = Object.keys(timeSeries).map(k => parseInt(k)).filter(k => !isNaN(k) && timeSeries[k] > 0).sort((a, b) => a - b)
         if (years.length > 0) {
-          valueStart = timeSeries[years[0]] ?? 0
-        }
-      }
-      if (valueEnd === 0) {
-        const years = Object.keys(timeSeries).map(k => parseInt(k)).filter(k => !isNaN(k)).sort((a, b) => b - a)
-        if (years.length > 0) {
-          valueEnd = timeSeries[years[0]] ?? 0
+          if (valueStart === 0) valueStart = timeSeries[years[0]] ?? 0
+          if (valueEnd === 0) valueEnd = timeSeries[years[years.length - 1]] ?? 0
         }
       }
       
@@ -284,11 +231,13 @@ export function GlobalKPICards() {
       marketSize2032 += num2032
     })
     
-    console.log('KPI Totals:', {
+    console.log('KPI Calculation Result:', {
+      recordsUsed: globalRecords.length,
       marketSize2024,
       marketSize2032,
-      recordsUsed: globalRecords.length,
-      calculationYears: `${kpiStartYear} to ${kpiEndYear}`
+      startYear: kpiStartYear,
+      endYear: kpiEndYear,
+      availableYears: availableYears.slice(0, 5)
     })
 
     // Calculate CAGR from start year to end year
